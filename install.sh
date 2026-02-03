@@ -313,9 +313,21 @@ for service in nginx apache2 httpd caddy lighttpd; do
     fi
 done
 
-# 杀死可能占用端口的进程
-pkill -f "python.*http.server.*80" 2>/dev/null || true
-pkill -f "nginx" 2>/dev/null || true
+# 杀死可能占用端口的进程（排除当前脚本进程）
+CURRENT_PID=$$
+PARENT_PID=$PPID
+
+# 只杀死独立运行的 Python HTTP 服务器进程
+for pid in $(pgrep -f "python.*http.server.*80" 2>/dev/null || true); do
+    if [ "$pid" != "$CURRENT_PID" ] && [ "$pid" != "$PARENT_PID" ]; then
+        kill "$pid" 2>/dev/null || true
+    fi
+done
+
+# 只杀死独立运行的 nginx 主进程
+for pid in $(pgrep -x "nginx" 2>/dev/null || true); do
+    kill "$pid" 2>/dev/null || true
+done
 
 # 等待端口释放
 sleep 2
