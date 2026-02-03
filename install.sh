@@ -240,12 +240,31 @@ cat > $WEB_DIR/index.html << 'EOF'
             font-size: 14px;
         }
         .links a:hover { text-decoration: underline; }
+        .error-msg {
+            display: none;
+            background: #fee2e2;
+            border: 1px solid #fecaca;
+            color: #dc2626;
+            padding: 12px 16px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            text-align: center;
+            font-size: 14px;
+            animation: shake 0.5s ease-in-out;
+        }
+        .error-msg.show { display: block; }
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            20%, 60% { transform: translateX(-5px); }
+            40%, 80% { transform: translateX(5px); }
+        }
     </style>
 </head>
 <body>
     <div class="login-box">
         <h1>用户登录</h1>
-        <form>
+        <div class="error-msg" id="errorMsg">账户不存在，请检查用户名后重试</div>
+        <form id="loginForm">
             <div class="input-group">
                 <label for="username">用户名</label>
                 <input type="text" id="username" placeholder="请输入用户名" required>
@@ -261,6 +280,15 @@ cat > $WEB_DIR/index.html << 'EOF'
             <a href="#">注册账号</a>
         </div>
     </div>
+    <script>
+        document.getElementById('loginForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            var errorMsg = document.getElementById('errorMsg');
+            errorMsg.classList.remove('show');
+            void errorMsg.offsetWidth;
+            errorMsg.classList.add('show');
+        });
+    </script>
 </body>
 </html>
 EOF
