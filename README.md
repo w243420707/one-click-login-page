@@ -1,4 +1,4 @@
-# 甲骨文云保活站点一键搭建
+# 一键登录页面部署
 
 一键在 VPS 上部署轻量级登录页面，专为甲骨文云 (Oracle Cloud) 等免费实例设计，防止因闲置被回收。
 
@@ -8,8 +8,10 @@
 - 🔍 **智能检测** - 自动识别系统、架构和包管理器
 - 📦 **自动安装依赖** - 已安装则跳过，未安装则自动安装
 - 🔄 **开机自启** - 支持 systemd / SysVinit / rc.local
+- 🔥 **自动配置防火墙** - 自动开放 80 端口 iptables 规则（支持 Oracle Cloud 等）
 - 🪶 **极致轻量** - 使用 Python 内置 HTTP 服务器，几乎零负载
 - 🎨 **美观界面** - 现代化渐变设计，响应式布局
+- 🔒 **登录模拟** - 点击登录显示"账户不存在"，模拟真实登录页面
 
 ## 📋 支持的系统
 
@@ -29,15 +31,15 @@
 ### 方式一：在线安装（推荐）
 
 ```bash
-bash <(curl -sL https://raw.githubusercontent.com/你的用户名/oracle-keepalive/main/install.sh)
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/w243420707/one-click-login-page/master/install.sh)"
 ```
 
 ### 方式二：手动安装
 
 ```bash
 # 克隆仓库
-git clone https://github.com/你的用户名/oracle-keepalive.git
-cd oracle-keepalive
+git clone https://github.com/w243420707/one-click-login-page.git
+cd one-click-login-page
 
 # 运行安装脚本（需要 root 权限）
 chmod +x install.sh
@@ -97,6 +99,14 @@ sudo systemctl stop nginx
 # 停止 apache（如果有）
 sudo systemctl stop apache2
 ```
+
+### 访问时显示 502 或无法连接？
+
+脚本已自动配置 iptables 规则。如果仍有问题，请检查云服务商的安全组/安全列表：
+
+- **Oracle Cloud**: 进入 VCN → Security Lists → 添加 Ingress Rule (TCP 80)
+- **AWS**: 检查 Security Group 入站规则
+- **阿里云/腾讯云**: 检查安全组规则
 
 ### 如何卸载？
 
