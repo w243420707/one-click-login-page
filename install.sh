@@ -297,55 +297,30 @@ log_info "登录页面已创建"
 # ==================== 释放 80 端口 ====================
 log_step "5/6" "检查并释放 80 端口..."
 
-# 停止已存在的 login-page 服务
+# 停止已存在的 login-page 服务（只停止本脚本创建的服务）
 if systemctl is-active --quiet login-page 2>/dev/null; then
     systemctl stop login-page
     log_info "已停止旧的 login-page 服务"
 fi
 
-# 停止常见的 Web 服务器（避免 502 冲突）
-for service in nginx apache2 httpd caddy lighttpd; do
-    if systemctl is-active --quiet $service 2>/dev/null; then
-        log_warn "检测到 $service 正在运行，正在停止并禁用..."
-        systemctl stop $service 2>/dev/null || true
-        systemctl disable $service 2>/dev/null || true
-        log_info "$service 已停止并禁用"
-    fi
-done
-
-# 杀死可能占用端口的进程（排除当前脚本进程）
-CURRENT_PID=$$
-PARENT_PID=$PPID
-
-# 只杀死独立运行的 Python HTTP 服务器进程
-for pid in $(pgrep -f "python.*http.server.*80" 2>/dev/null || true); do
-    if [ "$pid" != "$CURRENT_PID" ] && [ "$pid" != "$PARENT_PID" ]; then
-        kill "$pid" 2>/dev/null || true
-    fi
-done
-
-# 只杀死独立运行的 nginx 主进程
-for pid in $(pgrep -x "nginx" 2>/dev/null || true); do
-    kill "$pid" 2>/dev/null || true
-done
-
-# 等待端口释放
-sleep 2
-
-# 检查 80 端口
+# 检查 80 端口是否被占用
+PORT_IN_USE=false
 if command -v ss &>/dev/null && ss -tuln | grep -q ':80 '; then
-    log_warn "80 端口仍被占用，强制释放..."
-    fuser -k 80/tcp 2>/dev/null || true
-    sleep 2
+    PORT_IN_USE=true
 elif command -v netstat &>/dev/null && netstat -tuln | grep -q ':80 '; then
-    log_warn "80 端口仍被占用，强制释放..."
-    fuser -k 80/tcp 2>/dev/null || true
-    sleep 2
+    PORT_IN_USE=true
+fi
+
+if [ "$PORT_IN_USE" = true ]; then
+    log_warn "80 端口被占用，请手动释放后重新运行脚本"
+    log_warn "查看占用进程: lsof -i:80 或 ss -tuln | grep :80"
+    log_warn "如果是 nginx/apache，可使用: systemctl stop nginx"
+    # 不自动杀死进程，避免影响用户的其他服务
 else
     log_info "80 端口可用"
 fi
 
-# 配置 iptables 允许 80 端口入站
+# 配置 iptables 允许 80 端口入站（仅添加规则，不保存/持久化）
 log_info "配置防火墙规则..."
 
 # 检查是否存在 REJECT 规则（常见于 Oracle Cloud 等）
@@ -371,15 +346,9 @@ else
     fi
 fi
 
-# 持久化 iptables 规则
-if command -v netfilter-persistent &>/dev/null; then
-    netfilter-persistent save 2>/dev/null && log_info "iptables 规则已持久化 (netfilter-persistent)"
-elif [ -d /etc/iptables ]; then
-    iptables-save > /etc/iptables/rules.v4 2>/dev/null && log_info "iptables 规则已持久化 (rules.v4)"
-elif command -v iptables-save &>/dev/null; then
-    # CentOS/RHEL
-    iptables-save > /etc/sysconfig/iptables 2>/dev/null && log_info "iptables 规则已持久化 (sysconfig)"
-fi
+# NOTE: 不保存 iptables 规则，避免影响用户的其他端口配置
+# 如需持久化 80 端口规则，用户可手动执行: iptables-save > /etc/iptables/rules.v4
+log_info "提示: 80 端口规则已添加到运行时，如需持久化请手动保存"
 
 # ==================== 配置持久化服务 ====================
 log_step "6/6" "配置开机自启服务..."
