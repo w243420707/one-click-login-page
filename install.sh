@@ -275,20 +275,70 @@ if systemctl is-active --quiet login-page 2>/dev/null; then
     log_info "已停止旧的 login-page 服务"
 fi
 
+# 停止常见的 Web 服务器（避免 502 冲突）
+for service in nginx apache2 httpd caddy lighttpd; do
+    if systemctl is-active --quiet $service 2>/dev/null; then
+        log_warn "检测到 $service 正在运行，正在停止并禁用..."
+        systemctl stop $service 2>/dev/null || true
+        systemctl disable $service 2>/dev/null || true
+        log_info "$service 已停止并禁用"
+    fi
+done
+
 # 杀死可能占用端口的进程
 pkill -f "python.*http.server.*80" 2>/dev/null || true
+pkill -f "nginx" 2>/dev/null || true
+
+# 等待端口释放
+sleep 2
 
 # 检查 80 端口
 if command -v ss &>/dev/null && ss -tuln | grep -q ':80 '; then
-    log_warn "80 端口被占用，尝试释放..."
+    log_warn "80 端口仍被占用，强制释放..."
     fuser -k 80/tcp 2>/dev/null || true
-    sleep 1
+    sleep 2
 elif command -v netstat &>/dev/null && netstat -tuln | grep -q ':80 '; then
-    log_warn "80 端口被占用，尝试释放..."
+    log_warn "80 端口仍被占用，强制释放..."
     fuser -k 80/tcp 2>/dev/null || true
-    sleep 1
+    sleep 2
 else
     log_info "80 端口可用"
+fi
+
+# 配置 iptables 允许 80 端口入站
+log_info "配置防火墙规则..."
+
+# 检查是否存在 REJECT 规则（常见于 Oracle Cloud 等）
+if iptables -L INPUT -n --line-numbers 2>/dev/null | grep -q "REJECT"; then
+    # 获取 REJECT 规则的行号
+    REJECT_LINE=$(iptables -L INPUT -n --line-numbers 2>/dev/null | grep "REJECT" | head -1 | awk '{print $1}')
+    
+    # 检查 80 端口规则是否已存在
+    if ! iptables -L INPUT -n 2>/dev/null | grep -q "dpt:80"; then
+        # 在 REJECT 规则之前插入 80 端口规则
+        iptables -I INPUT $REJECT_LINE -p tcp --dport 80 -m state --state NEW -j ACCEPT 2>/dev/null && \
+            log_info "iptables 规则已添加（在 REJECT 之前）"
+    else
+        log_info "iptables 80 端口规则已存在"
+    fi
+else
+    # 没有 REJECT 规则，直接添加 ACCEPT 规则
+    if ! iptables -L INPUT -n 2>/dev/null | grep -q "dpt:80"; then
+        iptables -A INPUT -p tcp --dport 80 -m state --state NEW -j ACCEPT 2>/dev/null && \
+            log_info "iptables 规则已添加"
+    else
+        log_info "iptables 80 端口规则已存在"
+    fi
+fi
+
+# 持久化 iptables 规则
+if command -v netfilter-persistent &>/dev/null; then
+    netfilter-persistent save 2>/dev/null && log_info "iptables 规则已持久化 (netfilter-persistent)"
+elif [ -d /etc/iptables ]; then
+    iptables-save > /etc/iptables/rules.v4 2>/dev/null && log_info "iptables 规则已持久化 (rules.v4)"
+elif command -v iptables-save &>/dev/null; then
+    # CentOS/RHEL
+    iptables-save > /etc/sysconfig/iptables 2>/dev/null && log_info "iptables 规则已持久化 (sysconfig)"
 fi
 
 # ==================== 配置持久化服务 ====================
