@@ -320,35 +320,77 @@ else
     log_info "80 端口可用"
 fi
 
-# 配置 iptables 允许 80 端口入站（仅添加规则，不保存/持久化）
+# 配置 iptables 防火墙规则
 log_info "配置防火墙规则..."
 
-# 检查是否存在 REJECT 规则（常见于 Oracle Cloud 等）
-if iptables -L INPUT -n --line-numbers 2>/dev/null | grep -q "REJECT"; then
-    # 获取 REJECT 规则的行号
-    REJECT_LINE=$(iptables -L INPUT -n --line-numbers 2>/dev/null | grep "REJECT" | head -1 | awk '{print $1}')
-    
-    # 检查 80 端口规则是否已存在
-    if ! iptables -L INPUT -n 2>/dev/null | grep -q "dpt:80"; then
-        # 在 REJECT 规则之前插入 80 端口规则
-        iptables -I INPUT $REJECT_LINE -p tcp --dport 80 -m state --state NEW -j ACCEPT 2>/dev/null && \
-            log_info "iptables 规则已添加（在 REJECT 之前）"
-    else
-        log_info "iptables 80 端口规则已存在"
-    fi
-else
-    # 没有 REJECT 规则，直接添加 ACCEPT 规则
-    if ! iptables -L INPUT -n 2>/dev/null | grep -q "dpt:80"; then
-        iptables -A INPUT -p tcp --dport 80 -m state --state NEW -j ACCEPT 2>/dev/null && \
-            log_info "iptables 规则已添加"
-    else
-        log_info "iptables 80 端口规则已存在"
-    fi
+# 80 端口为登录页面必需，默认放行
+OPEN_PORTS=("80")
+
+# 交互式询问用户是否需要放行额外端口
+echo -e "\n${YELLOW}========================================${NC}"
+echo -e "  登录页面需要放行 ${GREEN}80${NC} 端口（已自动添加）"
+echo -e "  如需放行其他端口，请在下方输入"
+echo -e "${YELLOW}========================================${NC}"
+echo -e "  格式说明:"
+echo -e "    单端口:  ${GREEN}8080${NC}"
+echo -e "    端口范围: ${GREEN}20131:20135${NC}"
+echo -e "    多个端口: ${GREEN}443,8080,20131:20135${NC}"
+echo -e "    直接回车跳过（仅放行 80）"
+echo -e "${YELLOW}========================================${NC}"
+read -p "$(echo -e ${BLUE}'请输入额外放行的端口: '${NC})" EXTRA_PORTS
+
+if [ -n "$EXTRA_PORTS" ]; then
+    # 将逗号分隔的输入解析为数组
+    IFS=',' read -ra PORT_ARRAY <<< "$EXTRA_PORTS"
+    for p in "${PORT_ARRAY[@]}"; do
+        # 去除首尾空格
+        p=$(echo "$p" | xargs)
+        if [ -n "$p" ]; then
+            OPEN_PORTS+=("$p")
+        fi
+    done
 fi
 
-# NOTE: 不保存 iptables 规则，避免影响用户的其他端口配置
-# 如需持久化 80 端口规则，用户可手动执行: iptables-save > /etc/iptables/rules.v4
-log_info "提示: 80 端口规则已添加到运行时，如需持久化请手动保存"
+log_info "将放行以下端口: ${OPEN_PORTS[*]}"
+
+# 添加单条 iptables 放行规则的函数
+add_port_rule() {
+    local port=$1
+
+    # 使用 iptables -C 精确检查规则是否已存在，避免重复添加
+    if iptables -C INPUT -p tcp --dport $port -m state --state NEW -j ACCEPT 2>/dev/null; then
+        log_info "端口 $port 规则已存在，跳过"
+        return 0
+    fi
+
+    # 检查是否存在 REJECT 规则（常见于 Oracle Cloud 等云服务器）
+    if iptables -L INPUT -n --line-numbers 2>/dev/null | grep -q "REJECT"; then
+        # 获取 REJECT 规则的行号，在其之前插入放行规则
+        local reject_line=$(iptables -L INPUT -n --line-numbers 2>/dev/null | grep "REJECT" | head -1 | awk '{print $1}')
+        iptables -I INPUT $reject_line -p tcp --dport $port -m state --state NEW -j ACCEPT 2>/dev/null && \
+            log_info "端口 $port 规则已添加（在 REJECT 之前）"
+    else
+        iptables -A INPUT -p tcp --dport $port -m state --state NEW -j ACCEPT 2>/dev/null && \
+            log_info "端口 $port 规则已添加"
+    fi
+}
+
+for port in "${OPEN_PORTS[@]}"; do
+    add_port_rule "$port"
+done
+
+# 持久化保存 iptables 规则，确保重启后依然生效
+if [ -d /etc/iptables ]; then
+    iptables-save > /etc/iptables/rules.v4 2>/dev/null && \
+        log_info "iptables 规则已持久化保存到 /etc/iptables/rules.v4"
+elif command -v netfilter-persistent &>/dev/null; then
+    netfilter-persistent save 2>/dev/null && \
+        log_info "iptables 规则已通过 netfilter-persistent 保存"
+else
+    mkdir -p /etc/iptables
+    iptables-save > /etc/iptables/rules.v4 2>/dev/null && \
+        log_info "iptables 规则已保存到 /etc/iptables/rules.v4"
+fi
 
 # ==================== 配置持久化服务 ====================
 log_step "6/6" "配置开机自启服务..."
